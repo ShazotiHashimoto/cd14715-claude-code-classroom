@@ -1,49 +1,101 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import * as dotenv from 'dotenv';
+import { CodeReviewOrchestrator } from './orchestrator.js';
+import { ReportGenerator } from './utils/index.js';
 
-// Load environment variables
 dotenv.config();
 
-/**
- * Main entry point for the Claude Multi-Agent Code Review System
- * Usage: npm run dev <owner> <repo> <pr-number>
- */
+function validateInputs(owner: string | undefined, repo: string | undefined, prStr: string | undefined) {
+  if (!owner || !repo || !prStr) {
+    console.error('Usage: npm run dev -- <owner> <repo> <pr-number>');
+    process.exit(1);
+  }
+
+  const prNumber = Number.parseInt(prStr, 10);
+  if (!Number.isInteger(prNumber) || prNumber <= 0) {
+    console.error('PR number must be a positive integer.');
+    process.exit(1);
+  }
+
+  return { owner, repo, prNumber };
+}
+
+function validateAuthentication() {
+  const hasAnthropicApiKey = Boolean(process.env.ANTHROPIC_API_KEY);
+  const hasAwsCredentials = Boolean(
+    process.env.AWS_ACCESS_KEY_ID &&
+    process.env.AWS_SECRET_ACCESS_KEY
+  );
+
+  const hasAwsRegion = Boolean(process.env.AWS_REGION);
+
+  if (hasAnthropicApiKey) {
+    console.log('🔐 Using Anthropic API authentication');
+    return 'anthropic';
+  }
+
+  if (hasAwsCredentials && hasAwsRegion) {
+    console.log('🔐 Using AWS Bedrock authentication');
+    return 'aws';
+  }
+
+  console.error('Authentication required. Set one of the following:');
+  console.error('  - ANTHROPIC_API_KEY');
+  console.error('  - AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY + AWS_REGION');
+  process.exit(1);
+}
+
+function validateModel() {
+  const model = process.env.ANTHROPIC_MODEL;
+
+  if (!model) {
+    console.error('ANTHROPIC_MODEL is required. Example values:');
+    console.error('  - Anthropic API: claude-sonnet-4-5-20250929');
+    process.exit(1);
+  }
+
+  const isAnthropicFormat = /^claude-[a-z0-9-]+\d{8}.*$/.test(model) || model.includes('anthropic');
+  if (!isAnthropicFormat) {
+    console.error(`ANTHROPIC_MODEL is invalid: "${model}"`);
+    process.exit(1);
+  }
+
+  return model;
+}
+
 async function main() {
   const [owner, repo, prStr] = process.argv.slice(2);
+  const { owner: validOwner, repo: validRepo, prNumber } = validateInputs(owner, repo, prStr);
+  validateAuthentication();
+  validateModel();
 
-  // TODO: Validate command line arguments
-  // - Check if owner, repo, and prStr are provided
-  // - Convert prStr to number and validate it's a valid integer
-  // - Exit with error message if validation fails
-
-  // TODO: Validate authentication (choose ONE method)
-  // Students must have either:
-  //   - ANTHROPIC_API_KEY environment variable, OR
-  //   - AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY for Bedrock
-  //
-  // If using AWS Bedrock:
-  //   - Verify AWS_REGION is set
-  //   - Log: "🔐 Using AWS Bedrock authentication"
-  // If using Anthropic API:
-  //   - Log: "🔐 Using Anthropic API authentication"
-  // If neither method is configured:
-  //   - Exit with clear error message showing both options
-
-  // TODO: Validate ANTHROPIC_MODEL environment variable
-  // This is REQUIRED for both authentication methods
-  // - For AWS Bedrock: us.anthropic.claude-sonnet-4-5-20250929-v1:0
-  // - For Anthropic API: claude-sonnet-4-5-20250929
-  // Exit with error if not set
-
-  console.log('start here', owner, repo, prStr)
   try {
-    // TODO: Create orchestrator instance
-    // TODO: Call .reviewPullRequest(owner, repo, prNumber);
-    // TODO: Generate formatted reports using ReportGenerator
-    // Hint: Use ReportGenerator to create Markdown, HTML, and JSON reports
-    // Save reports to 'reports/' directory with appropriate filenames
+    const orchestrator = new CodeReviewOrchestrator();
+    const report = await orchestrator.reviewPullRequest(validOwner, validRepo, prNumber);
+
+    const generator = new ReportGenerator();
+    const outputDir = path.resolve(process.cwd(), 'reports');
+    fs.mkdirSync(outputDir, { recursive: true });
+
+    const fileBase = `${validOwner}_${validRepo}_${prNumber}`;
+    const markdownPath = path.join(outputDir, `${fileBase}.md`);
+    const htmlPath = path.join(outputDir, `${fileBase}.html`);
+    const jsonPath = path.join(outputDir, `${fileBase}.json`);
+
+    fs.writeFileSync(markdownPath, generator.generateMarkdownReport(report), 'utf8');
+    fs.writeFileSync(htmlPath, generator.generateHTMLReport(report), 'utf8');
+    fs.writeFileSync(jsonPath, generator.generateJSONReport(report), 'utf8');
+
+    console.log(`✅ Review complete for ${validOwner}/${validRepo}#${prNumber}`);
+    console.log(`📄 Reports saved to ${outputDir}`);
+    console.log(`   - ${path.basename(markdownPath)}`);
+    console.log(`   - ${path.basename(htmlPath)}`);
+    console.log(`   - ${path.basename(jsonPath)}`);
   } catch (error) {
-    console.error('Error:', error);
+    console.error('Error generating review report:', error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
   }
 }
 
-main();
+void main();

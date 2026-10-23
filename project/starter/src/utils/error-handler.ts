@@ -67,16 +67,33 @@ export async function withRetry<T>(
   maxRetries: number = 3,
   delayMs: number = 1000
 ): Promise<T> {
-  // TODO: Implement retry logic with exponential backoff
-  // Hints:
-  // - Use a for loop from 1 to maxRetries
-  // - Use try/catch to catch errors
-  // - Calculate backoff: delayMs * Math.pow(2, attempt - 1)
-  // - Add jitter: Math.random() * 100
-  // - Use setTimeout wrapped in Promise for delay
-  // - Throw ReviewError with ErrorCodes.RETRY_EXHAUSTED if all retries fail
+  let attempt = 0;
 
-  throw new Error('Not implemented');
+  while (true) {
+    try {
+      return await fn();
+    } catch (error) {
+      attempt += 1;
+      if (attempt > maxRetries) {
+        throw new ReviewError(
+          `Operation failed after ${maxRetries} retries`,
+          ErrorCodes.RETRY_EXHAUSTED,
+          {
+            attempt,
+            cause: error instanceof Error ? error.message : String(error),
+            maxRetries,
+            delayMs
+          }
+        );
+      }
+
+      const backoff = delayMs * Math.pow(2, attempt - 1);
+      const jitter = Math.random() * 100;
+      const waitMs = backoff + jitter;
+
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+    }
+  }
 }
 
 /**
@@ -96,14 +113,27 @@ export async function withTimeout<T>(
   timeoutMs: number,
   errorMessage: string = 'Operation timed out'
 ): Promise<T> {
-  // TODO: Implement timeout wrapper using Promise.race
-  // Hints:
-  // - Use Promise.race to race fn() against a timeout promise
-  // - The timeout promise should reject after timeoutMs milliseconds
-  // - Throw ReviewError with ErrorCodes.AGENT_TIMEOUT on timeout
-  // - Include timeoutMs in metadata
+  let timeoutId: NodeJS.Timeout | undefined;
 
-  throw new Error('Not implemented');
+  try {
+    return await Promise.race([
+      fn(),
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(
+            new ReviewError(errorMessage, ErrorCodes.AGENT_TIMEOUT, {
+              timeoutMs,
+              message: errorMessage
+            })
+          );
+        }, timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
 }
 
 /**

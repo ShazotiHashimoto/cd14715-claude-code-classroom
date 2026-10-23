@@ -1,53 +1,103 @@
-import { describe, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { ErrorCodes, ReviewError, withRetry, withTimeout } from '../src/utils/error-handler';
+import { RateLimiter } from '../src/utils/rate-limiter';
 
 
-/**
- * Tests for CodeReviewOrchestrator
- *
- * TODO: Implement these tests
- *
- * Tips:
- * - Use vitest mocking for MCP servers
- * - Mock rate limiter to avoid delays
- * - Test both success and failure paths
- */
+describe('withRetry', () => {
+  it('returns successfully on the first call', async () => {
+    const fn = vi.fn().mockResolvedValue('ok');
+
+    await expect(withRetry(fn, 3, 1)).resolves.toBe('ok');
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries and succeeds after transient failures', async () => {
+    const fn = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('temporary'))
+      .mockResolvedValue('done');
+
+    await expect(withRetry(fn, 3, 1)).resolves.toBe('done');
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  it('throws ReviewError after retries are exhausted', async () => {
+    const fn = vi.fn().mockRejectedValue(new Error('always fails'));
+
+    await expect(withRetry(fn, 2, 1)).rejects.toMatchObject({
+      code: ErrorCodes.RETRY_EXHAUSTED,
+      name: 'ReviewError'
+    });
+  });
+});
+
+describe('withTimeout', () => {
+  it('returns the result before the timeout', async () => {
+    const result = await withTimeout(async () => 'done', 30);
+    expect(result).toBe('done');
+  });
+
+  it('rejects with AGENT_TIMEOUT when the operation exceeds the limit', async () => {
+    await expect(
+      withTimeout(
+        () => new Promise((resolve) => setTimeout(() => resolve('late'), 50)),
+        10,
+        'slow operation'
+      )
+    ).rejects.toMatchObject({
+      code: ErrorCodes.AGENT_TIMEOUT,
+      name: 'ReviewError'
+    });
+  });
+});
+
+describe('RateLimiter', () => {
+  it('blocks requests when the request window is exhausted', () => {
+    const limiter = new RateLimiter({
+      maxRequestsPerMinute: 2,
+      maxTokensPerMinute: 2000,
+      maxConcurrent: 2
+    });
+
+    limiter['requestHistory'] = [
+      { timestamp: Date.now(), tokens: 1000 },
+      { timestamp: Date.now(), tokens: 1000 }
+    ];
+
+    expect(limiter.canProceed(10)).toBe(false);
+  });
+
+  it('prunes stale requests from the sliding window', () => {
+    const limiter = new RateLimiter({ maxRequestsPerMinute: 10, maxTokensPerMinute: 2000, maxConcurrent: 2 });
+    const now = Date.now();
+    limiter['requestHistory'] = [
+      { timestamp: now - 70000, tokens: 100 },
+      { timestamp: now - 1000, tokens: 200 }
+    ];
+
+    limiter['pruneOldRecords']();
+    expect(limiter['requestHistory']).toHaveLength(1);
+  });
+
+  it('releases a slot after acquire and release', async () => {
+    const limiter = new RateLimiter({
+      maxRequestsPerMinute: 100,
+      maxTokensPerMinute: 50000,
+      maxConcurrent: 1
+    });
+
+    await limiter.acquire(100);
+    expect(limiter.getStatus().activeRequests).toBe(1);
+
+    limiter.release();
+    expect(limiter.getStatus().activeRequests).toBe(0);
+  });
+});
 
 describe('CodeReviewOrchestrator', () => {
-  describe('Configuration', () => {
-    it('should initialize with default options', () => {
-    });
-
-    it('should accept custom rate limit configuration', () => {
-      // TODO: Create orchestrator with custom rate limits
-      // TODO: Verify custom limits are applied
-    });
-  });
-
-  describe('reviewPullRequest', () => {
-    it('should fetch PR files from GitHub MCP', async () => {
-     
-    });
-
-    it('should spawn all 3 subagents in parallel', async () => {
-  
-    });
-
-    it('should aggregate results into ReviewReport', async () => {
-  
-    });
-
-    it('should validate output with Zod schema', async () => {
-    });
-
- 
-  });
-
-
-  describe('Integration', () => {
-    // These tests require actual API keys and should be skipped in CI
-    it.skip('should review a real small PR', async () => {
-      // TODO: Test with a real public PR
-      // NOTE: Only run manually with valid API keys
-    });
+  it('initializes with default options', async () => {
+    const { CodeReviewOrchestrator } = await import('../src/orchestrator');
+    const orchestrator = new CodeReviewOrchestrator();
+    expect(orchestrator).toBeInstanceOf(CodeReviewOrchestrator);
   });
 });
