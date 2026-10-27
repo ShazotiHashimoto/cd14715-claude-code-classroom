@@ -1,3 +1,5 @@
+import 'dotenv/config';
+
 /**
  * Model Context Protocol (MCP) server configurations
  *

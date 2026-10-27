@@ -5,6 +5,16 @@ import { ReviewReport } from '../types/report-types';
  * Converts ReviewReport to various output formats (Markdown, HTML, JSON)
  */
 export class ReportGenerator {
+  private escapeHtml(value: string): string {
+    return value.replace(/[&<>"']/g, (character) => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;'
+    })[character] ?? character);
+  }
+
   /**
    * Generate a Markdown report for PR comments
    */
@@ -85,14 +95,27 @@ ${formattedFiles}
    * Generate an HTML report for web display
    */
   generateHTMLReport(report: ReviewReport): string {
-    const { summary, recommendations, metadata } = report;
+    const { summary, recommendations, fileReviews, metadata } = report;
 
     const recList = recommendations.slice(0, 5).map(r => `
       <li class="rec-${r.priority}">
         <span class="priority">[${r.priority.toUpperCase()}]</span>
-        <strong>${r.category}</strong>: ${r.description}
-        <br><small>Files: ${r.files.join(', ')}</small>
+        <strong>${this.escapeHtml(r.category)}</strong>: ${this.escapeHtml(r.description)}
+        <br><small>Files: ${this.escapeHtml(r.files.join(', '))}</small>
       </li>
+    `).join('');
+
+    const fileDetails = fileReviews.map(({ file, codeQuality, testCoverage, refactorings }) => `
+      <section class="file-review">
+        <h3>${this.escapeHtml(file)}</h3>
+        <p>Quality ${codeQuality.overallScore}/100 · Estimated coverage ${testCoverage.coverageEstimate}%</p>
+        <h4>Quality findings (${codeQuality.issues.length})</h4>
+        <ul>${codeQuality.issues.map(issue => `<li>[${issue.severity}] ${this.escapeHtml(issue.description)} <small>Line ${issue.line}</small></li>`).join('') || '<li>None found</li>'}</ul>
+        <h4>Untested paths (${testCoverage.untestedPaths.length})</h4>
+        <ul>${testCoverage.untestedPaths.map(path => `<li>[${path.priority}] ${this.escapeHtml(path.location)}: ${this.escapeHtml(path.suggestedTest)}</li>`).join('') || '<li>None found</li>'}</ul>
+        <h4>Refactoring suggestions (${refactorings.suggestions.length})</h4>
+        <ul>${refactorings.suggestions.map(suggestion => `<li><strong>${suggestion.impact}</strong> ${this.escapeHtml(suggestion.description)}<br><small>${this.escapeHtml(suggestion.before)} → ${this.escapeHtml(suggestion.after)}</small></li>`).join('') || '<li>None found</li>'}</ul>
+      </section>
     `).join('');
 
     return `<!DOCTYPE html>
@@ -125,6 +148,7 @@ ${formattedFiles}
     .metric { text-align: center; }
     .metric-value { font-size: 2em; font-weight: bold; color: #3498db; }
     .metric-label { color: #6c757d; font-size: 0.9em; }
+    .file-review { border-top: 1px solid #ced4da; padding: 16px 0; }
     ul { list-style: none; padding: 0; }
     li { padding: 12px; margin: 8px 0; border-radius: 4px; background: white; }
     .rec-critical { border-left: 4px solid #e74c3c; }
@@ -167,6 +191,9 @@ ${formattedFiles}
 
   <h2>🎯 Top Recommendations</h2>
   <ul>${recList || '<li>No recommendations at this time.</li>'}</ul>
+
+  <h2>File Reviews</h2>
+  ${fileDetails || '<p>No changed files were available for review.</p>'}
 
   <footer>
     Generated at ${metadata.analyzedAt} • Duration: ${metadata.duration}ms

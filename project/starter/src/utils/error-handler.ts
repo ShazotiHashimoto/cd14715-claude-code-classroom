@@ -65,7 +65,8 @@ export type ErrorCode = typeof ErrorCodes[keyof typeof ErrorCodes];
 export async function withRetry<T>(
   fn: () => Promise<T>,
   maxRetries: number = 3,
-  delayMs: number = 1000
+  delayMs: number = 1000,
+  shouldRetry: (error: unknown) => boolean = () => true
 ): Promise<T> {
   let attempt = 0;
 
@@ -85,6 +86,9 @@ export async function withRetry<T>(
             delayMs
           }
         );
+      }
+      if (!shouldRetry(error)) {
+        throw error;
       }
 
       const backoff = delayMs * Math.pow(2, attempt - 1);

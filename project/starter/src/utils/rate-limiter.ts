@@ -41,6 +41,9 @@ export class RateLimiter {
 
   constructor(config: Partial<RateLimiterConfig> = {}) {
     this.config = { ...DEFAULT_RATE_LIMITS, ...config };
+    if (Object.values(this.config).some((limit) => !Number.isFinite(limit) || limit <= 0)) {
+      throw new RangeError('Rate limiter limits must be positive finite numbers.');
+    }
   }
 
   /**
@@ -55,17 +58,17 @@ export class RateLimiter {
    * @param estimatedTokens - Estimated tokens for this request
    */
   async acquire(estimatedTokens: number = 1000): Promise<void> {
-    if (this.activeRequests >= this.config.maxConcurrent) {
-      await this.waitForSlot();
+    await this.waitForSlot();
+    try {
+      await this.waitForRateLimit(estimatedTokens);
+      this.requestHistory.push({
+        timestamp: Date.now(),
+        tokens: estimatedTokens
+      });
+    } catch (error) {
+      this.release();
+      throw error;
     }
-
-    await this.waitForRateLimit(estimatedTokens);
-
-    this.activeRequests += 1;
-    this.requestHistory.push({
-      timestamp: Date.now(),
-      tokens: estimatedTokens
-    });
   }
 
   /**
@@ -73,8 +76,6 @@ export class RateLimiter {
    * @param actualTokens - Actual tokens used (updates estimate)
    */
   release(actualTokens?: number): void {
-    this.activeRequests = Math.max(0, this.activeRequests - 1);
-
     // Update last request with actual token count if provided
     if (actualTokens !== undefined && this.requestHistory.length > 0) {
       const lastRequest = this.requestHistory.at(-1);
@@ -83,9 +84,13 @@ export class RateLimiter {
       }
     }
 
-    // Wake up next waiting request
+    // Transfer the released slot directly to the next waiter.
     const next = this.waitQueue.shift();
-    if (next) next();
+    if (next) {
+      next();
+    } else {
+      this.activeRequests = Math.max(0, this.activeRequests - 1);
+    }
   }
 
   /**
@@ -125,10 +130,9 @@ export class RateLimiter {
     const tokensInWindow = this.requestHistory.reduce((sum, record) => sum + record.tokens, 0);
 
     const hasConcurrentCapacity = this.activeRequests < this.config.maxConcurrent;
-    const hasRequestCapacity = requestsInWindow < this.config.maxRequestsPerMinute;
-    const hasTokenCapacity = tokensInWindow + estimatedTokens <= this.config.maxTokensPerMinute;
-
-    return hasConcurrentCapacity && hasRequestCapacity && hasTokenCapacity;
+    return hasConcurrentCapacity &&
+      requestsInWindow < this.config.maxRequestsPerMinute &&
+      tokensInWindow + estimatedTokens <= this.config.maxTokensPerMinute;
   }
 
   /**
@@ -138,9 +142,12 @@ export class RateLimiter {
    * and there's a queued waiter.
    */
   private async waitForSlot(): Promise<void> {
-    await new Promise<void>((resolve) => {
-      this.waitQueue.push(resolve);
-    });
+    if (this.activeRequests < this.config.maxConcurrent && this.waitQueue.length === 0) {
+      this.activeRequests += 1;
+      return;
+    }
+
+    await new Promise<void>((resolve) => this.waitQueue.push(resolve));
   }
 
   /**
@@ -153,7 +160,12 @@ export class RateLimiter {
    * @param estimatedTokens - Estimated tokens for the request
    */
   private async waitForRateLimit(estimatedTokens: number): Promise<void> {
-    while (!this.canProceed(estimatedTokens)) {
+    if (!Number.isFinite(estimatedTokens) || estimatedTokens < 0 || estimatedTokens > this.config.maxTokensPerMinute) {
+      throw new RangeError('Estimated tokens must be non-negative and no greater than the per-minute token limit.');
+    }
+
+    while (this.requestHistory.length >= this.config.maxRequestsPerMinute ||
+      this.requestHistory.reduce((sum, record) => sum + record.tokens, 0) + estimatedTokens > this.config.maxTokensPerMinute) {
       this.pruneOldRecords();
 
       if (this.requestHistory.length === 0) {

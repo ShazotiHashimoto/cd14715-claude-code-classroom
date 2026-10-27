@@ -3,7 +3,7 @@ import { CODE_QUALITY_ANALYZER_PROMPT } from '../prompts/index.js';
 
 export const codeQualityAnalyzer: AgentDefinition = {
   description: 'Analyze pull request code for quality, security, maintainability, and performance issues with actionable severity levels.',
-  tools: ['Read', 'Grep', 'Glob', 'Bash'],
+  tools: ['Read', 'Grep', 'Glob', 'Skill'],
   model: 'inherit',
   prompt: CODE_QUALITY_ANALYZER_PROMPT
 };

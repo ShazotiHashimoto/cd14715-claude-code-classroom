@@ -12,9 +12,14 @@ function validateInputs(owner: string | undefined, repo: string | undefined, prS
     process.exit(1);
   }
 
-  const prNumber = Number.parseInt(prStr, 10);
-  if (!Number.isInteger(prNumber) || prNumber <= 0) {
+  if (!/^[1-9]\d*$/.test(prStr)) {
     console.error('PR number must be a positive integer.');
+    process.exit(1);
+  }
+
+  const prNumber = Number(prStr);
+  if (!Number.isSafeInteger(prNumber)) {
+    console.error('PR number must be a positive safe integer.');
     process.exit(1);
   }
 
@@ -52,12 +57,14 @@ function validateModel() {
   if (!model) {
     console.error('ANTHROPIC_MODEL is required. Example values:');
     console.error('  - Anthropic API: claude-sonnet-4-5-20250929');
+    console.error('  - AWS Bedrock: us.anthropic.claude-sonnet-4-5-20250929-v1:0');
     process.exit(1);
   }
 
-  const isAnthropicFormat = /^claude-[a-z0-9-]+\d{8}.*$/.test(model) || model.includes('anthropic');
-  if (!isAnthropicFormat) {
-    console.error(`ANTHROPIC_MODEL is invalid: "${model}"`);
+  const isAnthropicApiModel = /^claude-[a-z0-9-]+$/.test(model);
+  const isBedrockModel = /^(?:[a-z0-9-]+\.)?anthropic\.claude-[a-z0-9-]+-v\d+:\d+$/.test(model);
+  if (!isAnthropicApiModel && !isBedrockModel) {
+    console.error('ANTHROPIC_MODEL format is invalid. Use an Anthropic model ID (claude-sonnet-4-5-20250929) or a Bedrock model ID (us.anthropic.claude-sonnet-4-5-20250929-v1:0).');
     process.exit(1);
   }
 

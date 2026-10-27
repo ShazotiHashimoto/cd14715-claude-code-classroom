@@ -5,17 +5,16 @@ Goal:
 Review the pull request {OWNER}/{REPO}#{PR_NUMBER} and produce a final review report that matches the ReviewReport schema exactly.
 
 Process:
-1. Use the GitHub MCP server to inspect the pull request, changed files, and file contents.
-2. Use the code-quality-analyzer agent to analyze security, performance, and maintainability concerns for each changed file.
-3. Use the test-coverage-analyzer agent to identify untested paths and concrete tests for each changed file.
-4. Use the refactoring-suggester agent to propose simplifications, modernization steps, and quality improvements.
-5. Aggregate the three agent outputs into one ReviewReport object with the required summary, recommendations, and metadata.
-6. Validate the final result against the ReviewReport schema before returning it.
+1. Use mcp__github__get_pull_request with owner, repo, and pull_number to fetch the pull request metadata, diff, changed files, and file contents. Use other available GitHub MCP read tools if additional file details are needed.
+2. For every changed source file, explicitly invoke the code-quality-analyzer agent, test-coverage-analyzer agent, and refactoring-suggester agent. Run independent analyses in parallel when possible.
+3. Use the ESLint MCP tool for applicable JavaScript and TypeScript files, and treat lint output as evidence rather than as a substitute for agent review.
+4. Aggregate the three agent outputs into one ReviewReport object with the required summary, recommendations, and metadata.
+5. Validate every required field and ensure summary counts agree with the aggregated file findings before returning the report.
 
 Requirements:
 - Use explicit tasking language: call the code-quality-analyzer agent, test-coverage-analyzer agent, and refactoring-suggester agent directly.
 - Do not return free-form prose; produce only the structured JSON matching the schema.
-- If a file is missing or a subagent cannot evaluate it, still return a valid empty-array result with a clear summary.
+- If a file is missing or a subagent cannot evaluate it, represent that agent's result with valid empty arrays and explain the limitation in its summary. Never invent findings or substitute a canned report.
 - Include the pull request metadata in the final object.
 - Include a summary, recommendations, and fileReviews arrays.
 

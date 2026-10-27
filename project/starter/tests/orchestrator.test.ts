@@ -29,6 +29,14 @@ describe('withRetry', () => {
       name: 'ReviewError'
     });
   });
+
+  it('does not retry failures marked as non-transient', async () => {
+    const error = new ReviewError('invalid structured output', ErrorCodes.VALIDATION_FAILED);
+    const fn = vi.fn().mockRejectedValue(error);
+
+    await expect(withRetry(fn, 3, 1, () => false)).rejects.toBe(error);
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('withTimeout', () => {
@@ -91,6 +99,30 @@ describe('RateLimiter', () => {
 
     limiter.release();
     expect(limiter.getStatus().activeRequests).toBe(0);
+  });
+
+  it('keeps concurrent acquisitions within the configured limit', async () => {
+    const limiter = new RateLimiter({
+      maxRequestsPerMinute: 100,
+      maxTokensPerMinute: 50000,
+      maxConcurrent: 1
+    });
+
+    await limiter.acquire(100);
+    let secondRequestAcquired = false;
+    const secondRequest = limiter.acquire(100).then(() => {
+      secondRequestAcquired = true;
+    });
+
+    await Promise.resolve();
+    expect(secondRequestAcquired).toBe(false);
+    expect(limiter.getStatus().activeRequests).toBe(1);
+
+    limiter.release();
+    await secondRequest;
+    expect(secondRequestAcquired).toBe(true);
+    expect(limiter.getStatus().activeRequests).toBe(1);
+    limiter.release();
   });
 });
 
