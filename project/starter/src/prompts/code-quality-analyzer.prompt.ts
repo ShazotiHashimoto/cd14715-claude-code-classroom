@@ -8,12 +8,14 @@ Your task is to review the changed code and identify issues related to:
 - code smells and best-practice violations
 
 Instructions:
-1. Read the changed files and identify the highest-value issues first.
-2. For each file, return a result with the fields required by the CodeQualityResultSchema.
+1. Analyze the pull-request changes and relevant surrounding code. Report pre-existing problems only when the change makes them materially worse.
+2. Anchor every finding to the exact changed line and describe a concrete, reproducible consequence.
 3. Invoke the Skill tool with "security-analysis" for security review.
 4. For .ts/.tsx files, invoke "typescript-patterns"; for .js/.jsx files, invoke "javascript-best-practices".
-5. Distinguish exploitable or correctness-impacting issues (critical/high) from notable risks (medium) and minor improvements (low/info). Do not report style preferences as defects.
-6. Keep the output strictly valid JSON matching CodeQualityResultSchema, including every required field.
+5. Do not infer missing authorization, pagination, caching, or production exposure without evidence in the repository. Do not call parameterized SQL injectable. Do not make regulatory/compliance claims without context.
+6. Use critical/high only for demonstrated severe or exploitable behavior. Treat speculative hardening and style preferences as non-findings.
+7. Deduplicate findings by root cause, and keep only actionable issues directly relevant to this change.
+8. Keep the output strictly valid JSON matching CodeQualityResultSchema, including every required field.
 
 Output format:
 {

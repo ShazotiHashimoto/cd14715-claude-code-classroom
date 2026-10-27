@@ -11,6 +11,7 @@ import type { ReviewReport } from './types/index.js';
 export interface OrchestratorOptions {
   maxTurns?: number;
   model?: string;
+  timeoutMs?: number;
   rateLimits?: Partial<RateLimiterConfig>;
 }
 
@@ -22,12 +23,14 @@ export class CodeReviewOrchestrator {
     this.options = {
       maxTurns: 60,
       model: process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-5-20250929',
+      timeoutMs: 900000,
       ...options
     };
     this.rateLimiter = new RateLimiter(options.rateLimits ?? {});
   }
 
   async reviewPullRequest(owner: string, repo: string, prNumber: number): Promise<ReviewReport> {
+    const startedAt = Date.now();
     return withRetry(async () => {
       const abortController = new AbortController();
       try {
@@ -41,6 +44,7 @@ export class CodeReviewOrchestrator {
             abortController,
             permissionMode: 'bypassPermissions',
             allowDangerouslySkipPermissions: true,
+            tools: ['Task', 'Read', 'Grep', 'Glob', 'WebFetch'],
             allowedTools: [
               'Task', 'Read', 'Grep', 'Glob', 'WebFetch',
               'mcp__github__get_pull_request', 'mcp__eslint__lint'
@@ -70,7 +74,28 @@ export class CodeReviewOrchestrator {
             if (message.structured_output && typeof message.structured_output === 'object') {
               const parsed = ReviewReportSchema.safeParse(message.structured_output);
               if (parsed.success) {
-                return parsed.data;
+                const report = parsed.data;
+                const fileReviews = report.fileReviews;
+                const qualityScores = fileReviews.map((review) => review.codeQuality.overallScore);
+                const untestedPaths = fileReviews.flatMap((review) => review.testCoverage.untestedPaths);
+                report.summary = {
+                  totalFiles: fileReviews.length,
+                  overallScore: qualityScores.length === 0
+                    ? 0
+                    : Math.round(qualityScores.reduce((total, score) => total + score, 0) / qualityScores.length),
+                  criticalIssues: fileReviews.reduce((total, review) => total +
+                    review.codeQuality.issues.filter((issue) => issue.severity === 'critical').length, 0),
+                  highPriorityTests: untestedPaths.filter((path) =>
+                    path.priority === 'critical' || path.priority === 'high').length,
+                  refactoringOpportunities: fileReviews.reduce((total, review) =>
+                    total + review.refactorings.suggestions.length, 0)
+                };
+                report.metadata = {
+                  ...report.metadata,
+                  analyzedAt: new Date().toISOString(),
+                  duration: Date.now() - startedAt
+                };
+                return report;
               }
               throw new ReviewError(
                 'The orchestrator returned output that does not match the ReviewReport schema.',
@@ -85,7 +110,7 @@ export class CodeReviewOrchestrator {
           'No structured output received from the orchestrator.',
           ErrorCodes.STRUCTURED_OUTPUT_FAILED
         );
-          }), 300000);
+          }), this.options.timeoutMs ?? 900000);
       } catch (error) {
         abortController.abort();
         throw error;
