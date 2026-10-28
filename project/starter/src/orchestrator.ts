@@ -42,12 +42,13 @@ export class CodeReviewOrchestrator {
             model: this.options.model,
             maxTurns: this.options.maxTurns,
             abortController,
-            permissionMode: 'bypassPermissions',
-            allowDangerouslySkipPermissions: true,
+            permissionMode: 'dontAsk',
             tools: ['Task', 'Read', 'Grep', 'Glob', 'WebFetch'],
             allowedTools: [
               'Task', 'Read', 'Grep', 'Glob', 'WebFetch',
-              'mcp__github__get_pull_request', 'mcp__eslint__lint'
+              'mcp__github__get_pull_request',
+              'mcp__github__get_pull_request_files',
+              'mcp__eslint__lint-files'
             ],
             agents: {
               'code-quality-analyzer': codeQualityAnalyzer,
